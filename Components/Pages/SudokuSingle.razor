@@ -1,0 +1,791 @@
+﻿@page "/SudokuSingle"
+@using System.Linq
+@using MudBlazor
+@using SudokuFullGame.Services
+@inject NavigationManager NavigationManager
+@inject SudokuGeneratorService StateServices
+@inject IJSRuntime JSRuntime
+@rendermode InteractiveServer
+@implements IDisposable
+
+<div class="page-container">
+
+    <div class="sidebar">
+        <MudButton class="custom-button" OnClick="NewGame">New Game</MudButton>
+        <MudButton class="custom-button" OnClick="RestartGame">Restart Game</MudButton>
+        <MudButton class="custom-button" OnClick="SubmitAnswers">Submit</MudButton>
+        <MudButton Class="custom-button" Href="/Home">Exit Game</MudButton>
+    </div>
+    <div class="game-container">
+
+        <div class="game-stats">
+            <div class="timer">Time: @elapsedTime.ToString(@"hh\:mm\:ss")</div>
+            <div class="score">Score: @score</div>
+            <div class="incorrect-count">Mistakes: @incorrectAnswersCount</div>
+        </div>
+        <div class="sudoku-grid">
+            @for (int row = 0; row < 9; row++)
+            {
+                <div class="sudoku-row">
+                    @for (int col = 0; col < 9; col++)
+                    {
+                        int currentRow = row;
+                        int currentCol = col;
+                        <input type="number"
+                               min="1"
+                               max="9"
+                               value="@(board[row, col] == 0 ? "" : board[row, col].ToString())"
+                               @oninput="@((e) => UpdateCell(currentRow, currentCol, e.Value.ToString()))"
+                               class="sudoku-input @(originalCells[row, col] ? "default-number" : "") @(IsValid(row, col) ? "" : "invalid")"
+                               readonly="@originalCells[row, col]" />
+                    }
+                </div>
+            }
+        </div>
+    </div>
+</div>
+<div class="popup @(showPopup ? "show" : "")">
+    <div class="popup-content">
+        <p>@popupMessage</p>
+        <div class="popup-buttons">
+            @if (isRestartPopup)
+            {
+                <button @onclick="ConfirmRestart">Yes</button>
+                <button @onclick="CancelRestart">No</button>
+            }
+            else
+            {
+                <button @onclick="ClosePopup">OK</button>
+            }
+        </div>
+    </div>
+</div>
+<div class="popup @(showCelebration ? "show" : "")">
+    <div class="popup-content celebration">
+        <h2>Congratulations!</h2>
+        <p>You've completed the Sudoku puzzle!</p>
+        <p>Time: @elapsedTime.ToString(@"hh\:mm\:ss")</p>
+        <p>Score: @score</p>
+        <p>Mistakes: @incorrectAnswersCount</p>
+        <button @onclick="CloseCelebration">Close</button>
+    </div>
+</div>
+@if (!string.IsNullOrEmpty(message))
+{
+    <div class="alert @(isSolved ? "alert-success" : "alert-danger")" role="alert">
+        @message
+    </div>
+}
+
+@code {
+    private int[,] board = new int[9, 9];
+    private int[,] initialBoard = new int[9, 9];
+    private int[,] solution = new int[9, 9];
+    private bool[,] incorrectCells = new bool[9, 9];
+    private string message = "";
+    private bool isSolved = false;
+    private Random random = new Random();
+    private bool[,] originalCells = new bool[9, 9];
+    private DateTime startTime;
+    private TimeSpan elapsedTime;
+    private Timer timer;
+    private int score = 0;
+    private int incorrectAnswersCount = 0;
+    private bool showPopup = false;
+    private bool isRestartPopup = false;
+    private string popupMessage = "";
+    private bool showCelebration = false;
+
+
+    public void Dispose()
+    {
+        timer?.Dispose();
+    }
+
+    protected override void OnInitialized()
+    {
+        NewGame();
+    }
+
+    private void NewGame()
+    {
+
+        board = GenerateRandomSudoku();
+        solution = (int[,])board.Clone();
+        initialBoard = (int[,])board.Clone();
+        originalCells = new bool[9, 9];
+
+        RemoveNumbers(board, 40);
+
+
+        for (int i = 0; i < 9; i++)
+        {
+            for (int j = 0; j < 9; j++)
+            {
+                originalCells[i, j] = board[i, j] != 0;
+            }
+        }
+        message = "";
+        isSolved = false;
+        incorrectCells = new bool[9, 9];
+        incorrectAnswersCount = 0;
+        startTime = DateTime.Now;
+        elapsedTime = TimeSpan.Zero;
+        timer = new Timer(UpdateTimer, null, 0, 1000);
+        score = 0;
+        StateHasChanged();
+    }
+
+    private void UpdateTimer(object state)
+    {
+        elapsedTime = DateTime.Now - startTime;
+        InvokeAsync(StateHasChanged);
+    }
+
+    private bool IsCellEditable(int row, int col)
+    {
+        return initialBoard[row, col] == 0 && !isSolved;
+    }
+    private void ShowSolution()
+    {
+        board = (int[,])solution.Clone();
+        isSolved = true;
+        message = "Here is the solution!";
+
+        StateHasChanged();
+    }
+
+    private void RestartGame()
+    {
+        isRestartPopup = true;
+        popupMessage = "Are you sure you want to restart the game? Your progress will be lost.";
+        showPopup = true;
+    }
+
+    private void ConfirmRestart()
+    {
+        showPopup = false;
+        for (int i = 0; i < 9; i++)
+        {
+            for (int j = 0; j < 9; j++)
+            {
+                if (!originalCells[i, j])
+                {
+                    board[i, j] = 0;
+                }
+            }
+        }
+        incorrectCells = new bool[9, 9];
+        message = "";
+        incorrectAnswersCount = 0;
+        isSolved = false;
+        StateHasChanged();
+    }
+
+    private void CancelRestart()
+    {
+        showPopup = false;
+    }
+
+    private string GetCellValue(int row, int col)
+    {
+        return board[row, col] == 0 ? "" : board[row, col].ToString();
+    }
+
+    private async Task UpdateCell(int row, int col, string value)
+    {
+        Console.WriteLine($"UpdateCell called: row={row}, col={col}, value={value}");
+        if (!originalCells[row, col] && !isSolved)
+        {
+
+            if (int.TryParse(value, out int result) && result >= 1 && result <= 9)
+            {
+                int previousValue = board[row, col];
+                board[row, col] = result;
+
+                if (board[row, col] == solution[row, col])
+                {
+                    incorrectCells[row, col] = false;
+                    if (previousValue != solution[row, col])
+                    {
+                        score += 10;
+                    }
+                }
+                else
+                {
+                    incorrectCells[row, col] = true;
+                    score -= 10;
+                    incorrectAnswersCount++;
+                }
+            }
+            else
+            {
+                if (board[row, col] == solution[row, col])
+                {
+                    score -= 10;
+                }
+                board[row, col] = 0;
+                incorrectCells[row, col] = false;
+            }
+
+            StateHasChanged();
+
+            if (IsBoardFilled())
+            {
+                timer?.Dispose(); 
+                await CheckSolution();
+            }
+        }
+    }
+
+    private bool IsBoardFilled()
+    {
+        for (int i = 0; i < 9; i++)
+        {
+            for (int j = 0; j < 9; j++)
+            {
+                if (board[i, j] == 0)
+                {
+                    return false;
+                }
+            }
+        }
+        timer?.Dispose(); 
+        return true;
+    }
+
+    private async Task CheckSolution()
+    {
+        incorrectCells = new bool[9, 9];
+        bool isCorrect = true;
+
+        for (int i = 0; i < 9; i++)
+        {
+            for (int j = 0; j < 9; j++)
+            {
+                if (board[i, j] != solution[i, j])
+                {
+                    isCorrect = false;
+                    incorrectCells[i, j] = true;
+                }
+            }
+        }
+
+       
+        isSolved = isCorrect;
+        if (isCorrect)
+        {
+            timer?.Dispose();
+            showCelebration = true;
+            await JSRuntime.InvokeVoidAsync("startCelebration");
+        }
+        StateHasChanged();
+
+        if (!isCorrect)
+        {
+            await JSRuntime.InvokeVoidAsync("alert", message);
+        }
+    }
+
+    
+    private void CloseCelebration()
+    {
+        showCelebration = false;
+    }
+
+    private bool IsValid(int row, int col)
+    {
+        return !incorrectCells[row, col];
+    }
+
+    private int[,] GenerateRandomSudoku()
+    {
+        int[,] grid = new int[9, 9];
+        FillDiagonal(grid);
+        FillRemaining(grid, 0, 3);
+        return grid;
+    }
+
+    private void FillDiagonal(int[,] grid)
+    {
+        for (int box = 0; box < 9; box += 3)
+        {
+            FillBox(grid, box, box);
+        }
+    }
+
+    private void FillBox(int[,] grid, int row, int col)
+    {
+        int num;
+        for (int i = 0; i < 3; i++)
+        {
+            for (int j = 0; j < 3; j++)
+            {
+                do
+                {
+                    num = random.Next(1, 10);
+                } while (!IsValid(grid, row, col, num));
+
+                grid[row + i, col + j] = num;
+            }
+        }
+    }
+
+    private bool IsValid(int[,] grid, int row, int col, int num)
+    {
+        for (int x = 0; x < 9; x++)
+        {
+            if (grid[row, x] == num || grid[x, col] == num)
+            {
+                return false;
+            }
+        }
+
+        int startRow = row - row % 3;
+        int startCol = col - col % 3;
+        for (int i = 0; i < 3; i++)
+        {
+            for (int j = 0; j < 3; j++)
+            {
+                if (grid[i + startRow, j + startCol] == num)
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+    private bool IsOriginalCell(int row, int col)
+    {
+        return originalCells[row, col];
+    }
+    private void RemoveNumbers(int[,] grid, int count)
+    {
+        int cellsRemoved = 0;
+        while (cellsRemoved < count)
+        {
+            int row = random.Next(9);
+            int col = random.Next(9);
+            if (grid[row, col] != 0)
+            {
+                grid[row, col] = 0;
+                cellsRemoved++;
+            }
+        }
+    }
+    private void ClosePopup()
+    {
+        isRestartPopup = false;
+        showPopup = false;
+    }
+
+    private async Task SubmitAnswers()
+    {
+        incorrectCells = new bool[9, 9];
+        bool isCorrect = true;
+        int incorrectCount = 0;
+
+        for (int i = 0; i < 9; i++)
+        {
+            for (int j = 0; j < 9; j++)
+            {
+                if (board[i, j] != solution[i, j])
+                {
+                    isCorrect = false;
+                    incorrectCells[i, j] = true;
+                    incorrectCount++;
+                }
+            }
+        }
+
+        timer?.Dispose();
+
+        if (isCorrect)
+        {
+            popupMessage = $"Congratulations! Your solution is correct! Final Score: {score}";
+            isSolved = true;
+        }
+        else
+        {
+            popupMessage = $"There are {incorrectCount} incorrect answers. Incorrect cells are highlighted. Current Score: {score}";
+        }
+
+        isRestartPopup = false;
+        showPopup = true;
+        StateHasChanged();
+    }
+        private bool FillRemaining(int[,] grid, int row, int col)
+    {
+        if (col >= 9 && row < 8)
+        {
+            row++;
+            col = 0;
+        }
+        if (row >= 9 && col >= 9)
+            return true;
+
+        if (row < 3)
+        {
+            if (col < 3)
+                col = 3;
+        }
+        else if (row < 6)
+        {
+            if (col == (row / 3) * 3)
+                col += 3;
+        }
+        else
+        {
+            if (col == 6)
+            {
+                row++;
+                col = 0;
+                if (row >= 9)
+                    return true;
+            }
+        }
+
+        for (int num = 1; num <= 9; num++)
+        {
+            if (IsValid(grid, row, col, num))
+            {
+                grid[row, col] = num;
+                if (FillRemaining(grid, row, col + 1))
+                    return true;
+
+                grid[row, col] = 0;
+            }
+        }
+        return false;
+    }
+
+}
+
+<style>
+    body {
+        margin: 0;
+        padding: 0;
+        background: linear-gradient(135deg, #1a237e 0%, #880E4F 100%);
+        font-family: 'Roboto', sans-serif;
+        min-height: 100vh;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+
+    .page-container {
+        display: flex;
+        width: 100%;
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 20px;
+    }
+
+    .sidebar {
+        width: 200px;
+        margin-right: 20px;
+        position: fixed;
+        left: 20px;
+        top: 50%;
+        transform: translateY(-50%);
+    }
+
+    .game-container {
+        flex-grow: 1;
+        background-color: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(10px);
+        border-radius: 20px;
+        padding: 30px;
+        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+        margin-left: 220px;
+        transition: all 0.3s ease;
+    }
+
+        .game-container:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 12px 40px 0 rgba(31, 38, 135, 0.5);
+            background-color: rgba(255, 255, 255, 0.15);
+        }
+
+    h1 {
+        text-align: center;
+        color: #ffffff;
+        font-family: 'Arial', sans-serif;
+        margin-bottom: 20px;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+    }
+
+    .sudoku-grid {
+        display: grid;
+        grid-template-columns: repeat(9, 1fr);
+        gap: 1px;
+        width: 450px;
+        border: 4px solid #ffffff;
+        background-color: rgba(255, 255, 255, 0.1);
+        border-radius: 10px;
+        overflow: hidden;
+        margin: 0 auto;
+    }
+
+    .sudoku-row {
+        display: contents;
+    }
+     
+    .sudoku-input {
+        width: 100%;
+        height: 50px;
+        text-align: center;
+        font-size: 20px;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        background-color: rgba(255, 255, 255, 0.1);
+        color: #ffffff;
+        -moz-appearance: textfield;
+        transition: all 0.3s ease;
+    }
+
+        .sudoku-input:hover {
+            background-color: rgba(255, 255, 255, 0.3);
+            transform: scale(1.05);
+            box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+        }
+
+        .sudoku-input::-webkit-inner-spin-button,
+        .sudoku-input::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+
+      
+        .sudoku-input:nth-child(3n) {
+            border-right: 2px solid rgba(255, 255, 255, 0.8);
+        }
+
+        .sudoku-input:nth-child(9n) {
+            border-right: none;
+        }
+
+    .sudoku-row:nth-child(3n) .sudoku-input {
+        border-bottom: 2px solid rgba(255, 255, 255, 0.8);
+    }
+
+    .sudoku-row:last-child .sudoku-input {
+        border-bottom: none;
+    }
+
+
+    .sudoku-input:nth-child(3n+1) {
+        border-left: 2px solid rgba(255, 255, 255, 0.8);
+    }
+
+    .sudoku-row:nth-child(3n+1) .sudoku-input {
+        border-top: 2px solid rgba(255, 255, 255, 0.8);
+    }
+
+
+    .invalid {
+        background-color: rgba(255, 0, 0, 0.3) !important;
+    }
+
+    .default-number {
+        color: #000000 !important;
+        font-weight: bold;
+    }
+
+    .custom-button {
+        margin-bottom: 10px;
+        background-color: rgba(255, 255, 255, 0.1) !important;
+        color: white !important;
+        padding: 15px 32px !important;
+        text-align: center !important;
+        text-decoration: none !important;
+        display: inline-block !important;
+        font-size: 18px !important;
+        transition: all 0.3s ease !important;
+        border: 2px solid rgba(255, 255, 255, 0.5) !important;
+        border-radius: 50px !important;
+        width: 100%;
+        backdrop-filter: blur(5px);
+    }
+
+        .custom-button:hover {
+            background-color: #880E4F !important;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 15px rgba(0, 0, 0, 0.2);
+        }
+
+    .alert {
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 15px;
+        border-radius: 5px;
+        color: white;
+        font-weight: bold;
+        text-align: center;
+        z-index: 1000;
+    }
+
+    .alert-success {
+        background-color: rgba(76, 175, 80, 0.9);
+    }
+
+    .alert-danger {
+        background-color: rgba(244, 67, 54, 0.9);
+    }
+
+    .timer {
+        text-align: center;
+        font-size: 24px;
+        color: #ffffff;
+        margin-bottom: 20px;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+    }
+
+    .invalid {
+        background-color: rgba(255, 0, 0, 0.3) !important;
+        border: 2px solid red !important;
+    }
+
+    .score {
+        text-align: center;
+        font-size: 24px;
+        color: #ffffff;
+        margin-bottom: 20px;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+    }
+
+    .game-stats {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 20px;
+    }
+
+    .timer, .score, .incorrect-count {
+        font-size: 18px;
+        color: #ffffff;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        padding: 10px;
+        border-radius: 10px;
+        transition: all 0.3s ease;
+    }
+
+        .timer:hover, .score:hover, .incorrect-count:hover {
+            background-color: rgba(255, 255, 255, 0.2);
+            transform: translateY(-5px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+        }
+
+    .incorrect-count {
+        color: #ffffff;
+    }
+
+    .popup {
+        display: none;
+        position: fixed;
+        z-index: 1000;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0,0,0,0.7);
+    }
+
+        .popup.show {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+    .popup-content {
+        background: linear-gradient(135deg, #1a237e 0%, #880E4F 100%);
+        padding: 30px;
+        border-radius: 20px;
+        text-align: center;
+        color: #ffffff;
+        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+        backdrop-filter: blur(10px);
+        border: 2px solid rgba(255, 255, 255, 0.18);
+        max-width: 80%;
+    }
+
+        .popup-content p {
+            font-size: 18px;
+            margin-bottom: 20px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+    .popup-buttons {
+        margin-top: 20px;
+    }
+
+        .popup-buttons button {
+            margin: 0 10px;
+            padding: 15px 32px;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            font-size: 18px;
+            transition: all 0.3s ease;
+            background-color: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: 2px solid rgba(255, 255, 255, 0.5);
+        }
+
+            .popup-buttons button:hover {
+                background-color: #880E4F;
+                transform: translateY(-2px);
+                box-shadow: 0 8px 15px rgba(0, 0, 0, 0.2);
+            }
+    ::deep keyframes ribbon-fall {
+        0% {
+            transform: translateY(-100vh) rotate(0deg);
+        }
+        100% {
+            transform: translateY(100vh) rotate(720deg);
+        }
+    }
+
+    .ribbon {
+        position: fixed;
+        
+        width: 10px;
+        height: 40px;
+        background-color: #f0f;
+        opacity: 0.8;
+        animation: ribbon-fall 4s linear infinite;
+        z-index: 9999;
+    }
+
+    .ribbon::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: inherit;
+        transform: translateZ(-1px) rotateY(90deg);
+    }
+</style>
+<script>
+    function startCelebration() {
+        const colors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff'];
+        const ribbonCount = 100;
+
+        for (let i = 0; i < ribbonCount; i++) {
+            const ribbon = document.createElement('div');
+            ribbon.className = 'ribbon';
+            ribbon.style.left = Math.random() * 100 + 'vw';
+            ribbon.style.animationDelay = (Math.random() * -4) + 's'; 
+            ribbon.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+            document.body.appendChild(ribbon);
+        }
+
+        setTimeout(() => {
+            const ribbonElements = document.querySelectorAll('.ribbon');
+            ribbonElements.forEach(el => el.remove());
+        }, 000); 
+    }
+</script>

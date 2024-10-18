@@ -1,0 +1,538 @@
+﻿@page "/Login"
+@using SudokuFullGame.Components
+@using SudokuFullGame.Services
+@using SudokuFullGame.Hubs
+@using SudokuFullGame.Models
+@using MudBlazor
+@inject RoomService RoomService
+@inject NavigationManager NavigationManager
+@using Microsoft.AspNetCore.SignalR.Client
+@rendermode InteractiveServer
+
+<div class="sudoku-container">
+    <div class="content-wrapper">
+        <h1 class="title">Room Manager</h1>
+
+
+        @if (!string.IsNullOrEmpty(ErrorMessage))
+        {
+            <MudAlert Severity="Severity.Error" Class="my-2">@ErrorMessage</MudAlert>
+        }
+
+        @if (string.IsNullOrEmpty(CurrentGamePin))
+        {
+            <MudTextField @bind-Value="PlayerName" Placeholder="Enter Your Name" Variant="Variant.Outlined" Class="mb-4 game-pin-input" FullWidth="true" />
+
+            @if (showJoinPin)
+            {
+                <MudTextField @bind-Value="GamePinToJoin" Placeholder="Enter Game PIN" Variant="Variant.Outlined" Class="mt-4 game-pin-input" FullWidth="true" />
+            }
+
+            <div class="button-container">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CreateRoom" Class="play-button" Disabled="@IsLoading">
+                    @if (IsLoading)
+                    {
+                        <MudProgressCircular Class="ms-n1" Size="Size.Small" Indeterminate="true" />
+                        <MudText Class="ms-2">Creating...</MudText>
+                    }
+                    else
+                    {
+                        <MudText>Create</MudText>
+                    }
+                </MudButton>
+
+                <MudButton Variant="Variant.Filled" Color="Color.Secondary" OnClick="HandleJoinButton" Class="play-button" Disabled="@IsLoading">
+                    @if (IsLoading)
+                    {
+                        <MudProgressCircular Class="ms-n1" Size="Size.Small" Indeterminate="true" />
+                        <MudText class="ms-2">@(showJoinPin ? "Joining..." : "Loading...")</MudText>
+                    }
+                    else
+                    {
+                        <MudText>Join</MudText>
+                    }
+                </MudButton>
+            </div>
+        }
+        else
+        {
+            <div class="game-info">
+                <div class="info-row">
+                    <span class="info-label">Game PIN:</span>
+                    <span class="info-value">@CurrentGamePin</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Your Player Number:</span>
+                    <span class="info-value">@CurrentPlayerNumber</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Players:</span>
+                    <div class="members-list">
+                        @foreach (var player in Players)
+                        {
+                            <span class="member-chip">@player.Value</span>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <div class="button-container">
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="LeaveRoom" Class="play-button" Disabled="@IsLoading">
+
+                    <MudText>Leave</MudText>
+                </MudButton>
+                @if (!string.IsNullOrEmpty(CurrentGamePin) && !IsGameStarted && IsAdmin)
+                {
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="StartGame" Class="play-button" Disabled="@isStartingGame">
+                        @if (isStartingGame)
+                        {
+                            <MudProgressCircular Class="ms-n1" Size="Size.Small" Indeterminate="true" />
+                            <MudText Class="ms-2">Starting...</MudText>
+                        }
+                        else
+                        {
+
+                            <MudText>Start</MudText>
+                        }
+                    </MudButton>
+                }
+            </div>
+        }
+    </div>
+    <div class="sudoku-grid">
+        @for (int i = 0; i < 400; i++)
+        {
+            <div class="sudoku-cell @(i % 2 == 0 ? "even" : "odd")">@(i % 9 + 1)</div>
+        }
+    </div>
+</div>
+
+<style>
+    body {
+        margin: 0;
+        padding: 0;
+        background: linear-gradient(135deg, #add8e6 0%, #880E4F 100%);
+        font-family: 'Roboto', sans-serif;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+    }
+
+    .sudoku-container {
+        background-color: rgba(255, 255, 255, 0.9);
+        border-radius: 20px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        padding: 40px;
+        text-align: center;
+        position: relative;
+        overflow: hidden;
+        width: 80%;
+        max-width: 500px;
+        min-height: 400px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+
+        .sudoku-container:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.3);
+        }
+
+    .content-wrapper {
+        position: relative;
+        z-index: 2;
+    }
+
+    .title {
+        color: #880E4F;
+        font-size: 2.5rem;
+        margin-bottom: 10px;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+    }
+
+    .subtitle {
+        color: #483d8b;
+        font-size: 1.2rem;
+        margin-bottom: 30px;
+    }
+
+    .button-container {
+        display: flex;
+        justify-content: center;
+        gap: 20px;
+        margin-top: 20px;
+    }
+
+    .play-button {
+        background-color: #880E4F !important;
+        color: white !important;
+        font-size: 1.2rem !important;
+        padding: 10px !important;
+        border-radius: 15px !important;
+        transition: all 0.3s ease !important;
+        text-transform: uppercase !important;
+        letter-spacing: 1px !important;
+        width: 100px !important;
+        height: 100px !important;
+        display: inline-flex !important;
+        flex-direction: column !important;
+        justify-content: center !important;
+        align-items: center !important;
+    }
+
+        .play-button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 20px rgba(255, 64, 129, 0.4);
+            background-color: #C51162 !important;
+        }
+
+    .button-icon {
+        font-size: 15px !important;
+        margin-bottom: 10px !important;
+    }
+
+    .sudoku-grid {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        display: flex;
+        flex-wrap: wrap;
+        opacity: 0.1;
+    }
+
+    .sudoku-cell {
+        width: 5%;
+        height: 5%;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        font-size: 0.8rem;
+        font-weight: bold;
+        color: #880E4F;
+    }
+
+        .sudoku-cell.odd {
+            transform: translateY(50%);
+        }
+
+    .game-pin-input {
+        width: 100%;
+        padding: 10px;
+        border: 2px solid #880E4F;
+        border-radius: 5px;
+        font-size: 16px;
+        margin-top: 20px;
+        color: #880E4F;
+        outline: none;
+    }
+
+        .game-pin-input::placeholder {
+            color: #880E4F;
+            opacity: 0.7;
+        }
+
+        .game-pin-input:focus {
+            border-color: #880E4F;
+            box-shadow: 0 0 5px rgba(136, 14, 79, 0.5);
+        }
+
+    .game-info {
+        text-align: left;
+        margin-top: 20px;
+    }
+
+    .info-row {
+        margin-bottom: 10px;
+    }
+
+    .info-label {
+        font-weight: bold;
+        color: #880E4F;
+    }
+
+    .info-value {
+        margin-left: 10px;
+    }
+
+    .members-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 5px;
+    }
+
+    .name-input, .game-pin-input {
+        width: 100%;
+        font-size: 16px;
+        color: #880E4F;
+    }
+
+
+    .member-chip {
+        background-color: #880E4F;
+        color: white;
+        padding: 5px 10px;
+        border-radius: 15px;
+        font-size: 0.9em;
+    }
+</style>
+
+@code {
+    private string CurrentGamePin { get; set; }
+    private string CurrentPlayerNumber { get; set; }
+    private Dictionary<string, string> Players { get; set; } = new Dictionary<string, string>();
+    private string GamePinToJoin { get; set; }
+    [Parameter]
+    [SupplyParameterFromQuery(Name = "playerName")]
+    public string PlayerName { get; set; }
+    public string GamePin { get; set; }
+
+    private HubConnection hubConnection;
+    private bool IsGameStarted { get; set; } = false;
+    private bool IsAdmin => CurrentPlayerNumber == "Player 1";
+    private string ErrorMessage { get; set; }
+    private bool IsLoading { get; set; }
+    private bool isStartingGame { get; set; } = false;
+    private bool showJoinPin = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        hubConnection = new HubConnectionBuilder()
+            .WithUrl(NavigationManager.ToAbsoluteUri("/roomHub"))
+            .Build();
+
+        hubConnection.On<Dictionary<string, string>>("ReceiveMembersUpdate", async (players) =>
+        {
+            Players = new Dictionary<string, string>(players);
+            await InvokeAsync(StateHasChanged);
+        });
+
+        hubConnection.On("GameStarted", async () =>
+        {
+            IsGameStarted = true;
+            await InvokeAsync(async () =>
+            {
+                await Task.Delay(100);
+                NavigationManager.NavigateTo($"/sudoku/{CurrentGamePin}?playerName={Uri.EscapeDataString(PlayerName)}");
+            });
+        });
+
+        hubConnection.On<string>("PlayerLeft", async (playerNumber) =>
+        {
+            if (Players.ContainsKey(playerNumber))
+            {
+                Players.Remove(playerNumber);
+                await InvokeAsync(StateHasChanged);
+            }
+        });
+
+        hubConnection.On<string, string>("PlayerJoined", async (playerName, playerNumber) =>
+        {
+            Players[playerNumber] = playerName;
+            await InvokeAsync(StateHasChanged);
+        });
+
+        hubConnection.On<string>("ErrorMessage", async (message) =>
+        {
+            ErrorMessage = message;
+            await InvokeAsync(StateHasChanged);
+        });
+
+        await hubConnection.StartAsync();
+        await hubConnection.SendAsync("JoinGame", GamePin, PlayerName);
+    }
+
+    private async Task CreateRoom()
+    {
+        if (string.IsNullOrWhiteSpace(PlayerName))
+        {
+            ErrorMessage = "Please enter your name.";
+            return;
+        }
+
+        IsLoading = true;
+        ErrorMessage = null;
+
+        try
+        {
+            var gamePin = GenerateGamePin();
+            var (room, playerNumber) = await RoomService.CreateRoomAsync(gamePin, PlayerName);
+            CurrentGamePin = room.GamePin;
+            CurrentPlayerNumber = playerNumber;
+
+            Players = new Dictionary<string, string>(room.Players);
+
+            IsGameStarted = false;
+            await hubConnection.SendAsync("JoinRoom", CurrentGamePin, PlayerName, playerNumber);
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Failed to create room: {ex.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private string GenerateGamePin()
+    {
+        Random random = new Random();
+        int pin = random.Next(100000, 999999);
+        return pin.ToString();
+    }
+
+    private async Task JoinRoom()
+    {
+        if (string.IsNullOrWhiteSpace(PlayerName) || string.IsNullOrWhiteSpace(GamePinToJoin))
+        {
+            ErrorMessage = "Please enter your name and Game PIN.";
+            return;
+        }
+
+        IsLoading = true;
+        ErrorMessage = null;
+
+        try
+        {
+            var (success, playerNumber) = await RoomService.JoinRoomAsync(GamePinToJoin, Guid.NewGuid().ToString(), PlayerName);
+            if (success)
+            {
+                CurrentGamePin = GamePinToJoin;
+                CurrentPlayerNumber = playerNumber;
+
+                var room = await RoomService.GetRoomAsync(CurrentGamePin);
+                if (room != null)
+                {
+                    Players = new Dictionary<string, string>(room.Players);
+                    await hubConnection.SendAsync("JoinRoom", CurrentGamePin, PlayerName, playerNumber);
+
+                    await hubConnection.SendAsync("StorePlayerName", CurrentGamePin, playerNumber, PlayerName);
+                    await CheckGameStatus();
+                }
+            }
+            else
+            {
+                ErrorMessage = "Failed to join room. Room might be full or doesn't exist.";
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Failed to join room: {ex.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LeaveRoom()
+    {
+        if (!string.IsNullOrEmpty(CurrentGamePin) && !string.IsNullOrEmpty(CurrentPlayerNumber))
+        {
+            IsLoading = true;
+            ErrorMessage = null;
+
+            try
+            {
+                await hubConnection.SendAsync("LeaveRoom", CurrentGamePin, CurrentPlayerNumber);
+                CurrentGamePin = null;
+                CurrentPlayerNumber = null;
+                Players.Clear();
+                IsGameStarted = false;
+            }
+            catch (Exception ex)
+            {
+                ErrorMessage = $"Failed to leave room: {ex.Message}";
+            }
+            finally
+            {
+                IsLoading = false;
+            }
+        }
+    }
+
+    private async Task StartGame()
+    {
+        if (isStartingGame) return;
+
+        try
+        {
+            isStartingGame = true;
+            StateHasChanged();
+
+            await hubConnection.SendAsync("StartGame", CurrentGamePin);
+
+            await Task.Delay(1000);
+
+            if (!IsGameStarted)
+            {
+                IsGameStarted = true;
+                await InvokeAsync(() => NavigationManager.NavigateTo($"/sudoku/{CurrentGamePin}"));
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error starting game: {ex.Message}");
+            ErrorMessage = $"Failed to start game: {ex.Message}";
+        }
+        finally
+        {
+            isStartingGame = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task CheckGameStatus()
+    {
+        try
+        {
+            var status = await hubConnection.InvokeAsync<bool>("CheckGameStatus", CurrentGamePin);
+            IsGameStarted = status;
+            if (IsGameStarted)
+            {
+                await InvokeAsync(() => NavigationManager.NavigateTo($"/sudoku/{CurrentGamePin}?playerName={Uri.EscapeDataString(PlayerName)}"));
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error checking game status: {ex.Message}");
+            ErrorMessage = $"Failed to check game status: {ex.Message}";
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (hubConnection is not null)
+        {
+            await hubConnection.DisposeAsync();
+        }
+    }
+
+    private void ToggleJoinPin()
+    {
+        showJoinPin = !showJoinPin;
+    }
+
+    private async Task HandleJoinButton()
+    {
+        if (!showJoinPin)
+        {
+            showJoinPin = true;
+        }
+        else if (!string.IsNullOrWhiteSpace(GamePinToJoin))
+        {
+            await JoinRoom();
+        }
+        else
+        {
+            ErrorMessage = "Please enter a Game PIN.";
+        }
+    }
+}
